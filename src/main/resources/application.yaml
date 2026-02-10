@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: dependency-maze
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8080

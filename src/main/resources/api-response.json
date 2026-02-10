@@ -1,0 +1,12 @@
+[
+  {
+    "groupId": "org.vladv.dependency",
+    "artifactId": "dependency-maze",
+    "version": "0.0.1-SNAPSHOT",
+    "scope": "compile",
+    "children": [],
+    "conflict": false,
+    "conflictVersion": null,
+    "coordinates": "org.vladv.dependency:dependency-maze"
+  }
+]

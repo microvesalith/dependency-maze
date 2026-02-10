@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dependency Maze - Maven Dependency Visualizer</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #eee;
+        }
+
+        .container {
+            max-width: 100%;
+            padding: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #4fc3f7;
+            font-size: 2rem;
+        }
+
+        .upload-area {
+            border: 3px dashed #4fc3f7;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            margin: 0 auto 20px;
+            max-width: 600px;
+            background: rgba(79, 195, 247, 0.05);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .upload-area:hover, .upload-area.drag-over {
+            background: rgba(79, 195, 247, 0.15);
+            border-color: #81d4fa;
+        }
+
+        .upload-area.drag-over {
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            font-size: 18px;
+            color: #b0bec5;
+        }
+
+        .upload-text span {
+            color: #4fc3f7;
+            text-decoration: underline;
+        }
+
+        #file-input {
+            display: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(79, 195, 247, 0.3);
+            border-top-color: #4fc3f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        #graph-container {
+            width: 100%;
+            height: calc(100vh - 250px);
+            min-height: 500px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+
+        .scope-compile { background: #4fc3f7; }
+        .scope-test { background: #81c784; }
+        .scope-provided { background: #ffb74d; }
+        .scope-runtime { background: #ba68c8; }
+        .scope-system { background: #90a4ae; }
+        .conflict { background: #ef5350; border: 2px solid #fff; }
+
+        /* D3 Node Styles */
+        .node circle {
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .node circle:hover {
+            filter: brightness(1.2);
+        }
+
+        .node text {
+            font-size: 11px;
+            fill: #eee;
+            pointer-events: none;
+        }
+
+        .link {
+            fill: none;
+            stroke: #546e7a;
+            stroke-width: 1.5px;
+            stroke-opacity: 0.6;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(30, 30, 50, 0.95);
+            border: 1px solid #4fc3f7;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 1000;
+            max-width: 350px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .tooltip .title {
+            font-weight: bold;
+            color: #4fc3f7;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+
+        .tooltip .detail {
+            margin: 4px 0;
+            color: #b0bec5;
+        }
+
+        .tooltip .conflict-warning {
+            color: #ef5350;
+            margin-top: 8px;
+            font-weight: bold;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: #4fc3f7;
+            color: #1a1a2e;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #81d4fa;
+            transform: translateY(-2px);
+        }
+
+        .stats {
+            text-align: center;
+            margin-bottom: 15px;
+            color: #b0bec5;
+            font-size: 14px;
+        }
+
+        .error {
+            background: rgba(239, 83, 80, 0.2);
+            border: 1px solid #ef5350;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px auto;
+            max-width: 600px;
+            text-align: center;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Dependency Maze</h1>
+
+        <div class="upload-area" id="upload-area">
+            <div class="upload-icon">📄</div>
+            <div class="upload-text">
+                Drag & drop your <strong>pom.xml</strong> here<br>
+                or <span>click to browse</span>
+            </div>
+            <input type="file" id="file-input" accept=".xml">
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div>Resolving dependencies from Maven Central...</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #78909c;">This may take a moment</div>
+        </div>
+
+        <div class="error" id="error"></div>
+
+        <div class="legend" id="legend" style="display: none;">
+            <div class="legend-item"><div class="legend-color scope-compile"></div> Compile</div>
+            <div class="legend-item"><div class="legend-color scope-test"></div> Test</div>
+            <div class="legend-item"><div class="legend-color scope-provided"></div> Provided</div>
+            <div class="legend-item"><div class="legend-color scope-runtime"></div> Runtime</div>
+            <div class="legend-item"><div class="legend-color conflict"></div> Version Conflict</div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="controls" id="controls" style="display: none;">
+            <button onclick="resetZoom()">Reset Zoom</button>
+            <button onclick="expandAll()">Expand All</button>
+            <button onclick="collapseAll()">Collapse All</button>
+            <button onclick="resetUpload()">Upload New File</button>
+        </div>
+
+        <div id="graph-container"></div>
+    </div>
+
+    <div class="tooltip" id="tooltip" style="display: none;"></div>
+
+    <script>
+        // Global variables
+        let treeData = null;
+        let svg = null;
+        let g = null;
+        let zoom = null;
+        let root = null;
+        let treemap = null;
+
+        // Scope colors
+        const scopeColors = {
+            compile: '#4fc3f7',
+            test: '#81c784',
+            provided: '#ffb74d',
+            runtime: '#ba68c8',
+            system: '#90a4ae',
+            import: '#78909c'
+        };
+        const conflictColor = '#ef5350';
+
+        // File upload handling
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('drag-over');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('drag-over');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) handleFile(file);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        async function handleFile(file) {
+            if (!file.name.endsWith('.xml')) {
+                showError('Please upload a valid XML file');
+                return;
+            }
+
+            showLoading(true);
+            hideError();
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                // Use the new raw DOT endpoint
+                const response = await fetch('/api/analyze-raw', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+
+                const dot = await response.text();
+                showLoading(false);
+                const treeData = parseDotToTree(dot);
+                if (!treeData) {
+                    showError('Could not parse dependency tree.');
+                    return;
+                }
+                renderTree(treeData);
+            } catch (error) {
+                showLoading(false);
+                showError('Error: ' + error.message);
+            }
+        }
+
+        function parseDotToTree(dot) {
+            // Parse DOT format to tree structure
+            const lines = dot.split('\n')
+              .map(l => l.trim())
+              .filter(l => l && !l.startsWith('digraph') && l !== '}');
+            const edges = [];
+            const nodeMap = {};
+            const allChildren = new Set();
+            for (const line of lines) {
+                if (line.includes('->')) {
+                    const [parentRaw, childRaw] = line.split('->');
+                    const parent = parentRaw.replace(/[" ]/g, '');
+                    const child = childRaw.replace(/[" ;]/g, '');
+                    edges.push([parent, child]);
+                    allChildren.add(child);
+                    if (!nodeMap[parent]) nodeMap[parent] = makeNodeFromId(parent);
+                    if (!nodeMap[child]) nodeMap[child] = makeNodeFromId(child);
+                }
+            }
+            // Find root
+            let rootId = null;
+            for (const id in nodeMap) {
+                if (!allChildren.has(id)) {
+                    rootId = id;
+                    break;
+                }
+            }
+            if (!rootId) return null;
+            // Build tree
+            for (const [parent, child] of edges) {
+                nodeMap[parent].children = nodeMap[parent].children || [];
+                nodeMap[parent].children.push(nodeMap[child]);
+            }
+            return nodeMap[rootId];
+        }
+
+        function makeNodeFromId(id) {
+            // id: groupId:artifactId:type:version(:scope)
+            const parts = id.split(':');
+            return {
+                groupId: parts[0],
+                artifactId: parts[1] || '',
+                version: parts[3] || '',
+                scope: parts[4] || 'compile',
+                children: [],
+                conflict: false,
+                conflictVersion: null,
+                coordinates: parts[0] + ':' + (parts[1] || '')
+            };
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('upload-area').style.display = show ? 'none' : 'block';
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+
+        function resetUpload() {
+            document.getElementById('upload-area').style.display = 'block';
+            document.getElementById('graph-container').style.display = 'none';
+            document.getElementById('legend').style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('stats').textContent = '';
+            fileInput.value = '';
+            if (svg) {
+                svg.remove();
+                svg = null;
+            }
+        }
+
+        function renderTree(data) {
+            document.getElementById('upload-area').style.display = 'none';
+            document.getElementById('graph-container').style.display = 'block';
+            document.getElementById('legend').style.display = 'flex';
+            document.getElementById('controls').style.display = 'flex';
+
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '';
+
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Count stats
+            let totalDeps = 0;
+            let conflicts = 0;
+            const countNodes = (node) => {
+                totalDeps++;
+                if (node.conflict) conflicts++;
+                if (node.children) node.children.forEach(countNodes);
+            };
+            countNodes(data);
+
+            document.getElementById('stats').innerHTML =
+                `<strong>${totalDeps}</strong> dependencies | <strong style="color: ${conflicts > 0 ? conflictColor : '#81c784'}">${conflicts}</strong> version conflicts`;
+
+            // Create SVG
+            svg = d3.select('#graph-container')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            g = svg.append('g')
+                .attr('transform', `translate(100, ${height / 2})`);
+
+            // Setup zoom
+            zoom = d3.zoom()
+                .scaleExtent([0.1, 3])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            // Create tree layout
+            treemap = d3.tree().nodeSize([25, 200]);
+
+            // Create hierarchy
+            root = d3.hierarchy(data, d => d.children);
+            root.x0 = 0;
+            root.y0 = 0;
+
+            // Collapse all children initially except first level
+            if (root.children) {
+                root.children.forEach(collapse);
+            }
+
+            update(root);
+
+            // Center the view
+            const initialTransform = d3.zoomIdentity.translate(100, height / 2);
+            svg.call(zoom.transform, initialTransform);
+        }
+
+        function collapse(d) {
+            if (d.children) {
+                d._children = d.children;
+                d._children.forEach(collapse);
+                d.children = null;
+            }
+        }
+
+        function expand(d) {
+            if (d._children) {
+                d.children = d._children;
+                d._children = null;
+            }
+            if (d.children) {
+                d.children.forEach(expand);
+            }
+        }
+
+        function update(source) {
+            const duration = 300;
+            const treeDataLayout = treemap(root);
+
+            const nodes = treeDataLayout.descendants();
+            const links = treeDataLayout.links();
+
+            // Normalize for fixed-depth
+            nodes.forEach(d => d.y = d.depth * 220);
+
+            // Update nodes
+            const node = g.selectAll('g.node')
+                .data(nodes, d => d.id || (d.id = Math.random()));
+
+            // Enter new nodes
+            const nodeEnter = node.enter().append('g')
+                .attr('class', 'node')
+                .attr('transform', d => `translate(${source.y0},${source.x0})`)
+                .on('click', (event, d) => {
+                    if (d.children) {
+                        d._children = d.children;
+                        d.children = null;
+                    } else {
+                        d.children = d._children;
+                        d._children = null;
+                    }
+                    update(d);
+                })
+                .on('mouseover', showTooltip)
+                .on('mouseout', hideTooltip);
+
+            nodeEnter.append('circle')
+                .attr('r', 0)
+                .style('fill', d => getNodeColor(d.data))
+                .style('stroke', d => d.data.conflict ? '#fff' : d3.color(getNodeColor(d.data)).darker(0.5))
+                .style('stroke-width', d => d.data.conflict ? '3px' : '2px');
+
+            nodeEnter.append('text')
+                .attr('dy', '.35em')
+                .attr('x', d => d.children || d._children ? -15 : 15)
+                .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+                .text(d => truncate(d.data.artifactId, 25));
+
+            // Update
+            const nodeUpdate = nodeEnter.merge(node);
+
+            nodeUpdate.transition()
+                .duration(duration)
+                .attr('transform', d => `translate(${d.y},${d.x})`);
+
+            nodeUpdate.select('circle')
+                .attr('r', d => d._children ? 8 : 6)
+                .style('fill', d => getNodeColor(d.data))
+                .style('stroke', d => d.data.conflict ? '#fff' : d3.color(getNodeColor(d.data)).darker(0.5));
+
+            nodeUpdate.select('text')
+                .attr('x', d => d.children || d._children ? -15 : 15)
+                .attr('text-anchor', d => d.children || d._children ? 'end' : 'start');
+
+            // Exit
+            const nodeExit = node.exit().transition()
+                .duration(duration)
+                .attr('transform', d => `translate(${source.y},${source.x})`)
+                .remove();
+
+            nodeExit.select('circle').attr('r', 0);
+            nodeExit.select('text').style('fill-opacity', 0);
+
+            // Update links
+            const link = g.selectAll('path.link')
+                .data(links, d => d.target.id);
+
+            const linkEnter = link.enter().insert('path', 'g')
+                .attr('class', 'link')
+                .attr('d', d => {
+                    const o = {x: source.x0, y: source.y0};
+                    return diagonal(o, o);
+                });
+
+            const linkUpdate = linkEnter.merge(link);
+
+            linkUpdate.transition()
+                .duration(duration)
+                .attr('d', d => diagonal(d.source, d.target));
+
+            link.exit().transition()
+                .duration(duration)
+                .attr('d', d => {
+                    const o = {x: source.x, y: source.y};
+                    return diagonal(o, o);
+                })
+                .remove();
+
+            // Store old positions
+            nodes.forEach(d => {
+                d.x0 = d.x;
+                d.y0 = d.y;
+            });
+        }
+
+        function diagonal(s, d) {
+            return `M ${s.y} ${s.x}
+                    C ${(s.y + d.y) / 2} ${s.x},
+                      ${(s.y + d.y) / 2} ${d.x},
+                      ${d.y} ${d.x}`;
+        }
+
+        function getNodeColor(data) {
+            if (data.conflict) return conflictColor;
+            return scopeColors[data.scope] || scopeColors.compile;
+        }
+
+        function truncate(str, maxLength) {
+            if (!str) return '';
+            return str.length > maxLength ? str.substring(0, maxLength) + '...' : str;
+        }
+
+        function showTooltip(event, d) {
+            const tooltip = document.getElementById('tooltip');
+            const data = d.data;
+
+            let html = `
+                <div class="title">${data.groupId}:${data.artifactId}</div>
+                <div class="detail"><strong>Version:</strong> ${data.version}</div>
+                <div class="detail"><strong>Scope:</strong> ${data.scope}</div>
+            `;
+
+            if (data.conflict) {
+                html += `<div class="conflict-warning">⚠️ Version conflict! Also found: ${data.conflictVersion}</div>`;
+            }
+
+            if (d.parent) {
+                html += `<div class="detail" style="margin-top: 8px;"><strong>Pulled by:</strong> ${d.parent.data.groupId}:${d.parent.data.artifactId}</div>`;
+            }
+
+            if (d.children || d._children) {
+                const childCount = (d.children || d._children).length;
+                html += `<div class="detail"><strong>Dependencies:</strong> ${childCount}</div>`;
+            }
+
+            tooltip.innerHTML = html;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (event.pageX + 15) + 'px';
+            tooltip.style.top = (event.pageY - 10) + 'px';
+        }
+
+        function hideTooltip() {
+            document.getElementById('tooltip').style.display = 'none';
+        }
+
+        function resetZoom() {
+            const height = document.getElementById('graph-container').clientHeight;
+            svg.transition().duration(500).call(
+                zoom.transform,
+                d3.zoomIdentity.translate(100, height / 2)
+            );
+        }
+
+        function expandAll() {
+            expand(root);
+            update(root);
+        }
+
+        function collapseAll() {
+            if (root.children) {
+                root.children.forEach(collapse);
+            }
+            update(root);
+        }
+    </script>
+</body>
+</html>
